@@ -5,17 +5,18 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/proto"
-	"v2ray.com/core/common/platform/filesystem"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/serial"
-	"v2ray.com/core/transport/internet"
-	"v2ray.com/core/transport/internet/domainsocket"
-	"v2ray.com/core/transport/internet/http"
-	"v2ray.com/core/transport/internet/kcp"
-	"v2ray.com/core/transport/internet/quic"
-	"v2ray.com/core/transport/internet/tcp"
-	"v2ray.com/core/transport/internet/tls"
-	"v2ray.com/core/transport/internet/websocket"
+
+	"github.com/v2fly/v2ray-core/v4/common/platform/filesystem"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/serial"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/domainsocket"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/http"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/kcp"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/quic"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/tcp"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/tls"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/websocket"
 )
 
 var (
@@ -134,10 +135,12 @@ func (c *TCPConfig) Build() (proto.Message, error) {
 }
 
 type WebSocketConfig struct {
-	Path                string            `json:"path"`
-	Path2               string            `json:"Path"` // The key was misspelled. For backward compatibility, we have to keep track the old key.
-	Headers             map[string]string `json:"headers"`
-	AcceptProxyProtocol bool              `json:"acceptProxyProtocol"`
+	Path                 string            `json:"path"`
+	Path2                string            `json:"Path"` // The key was misspelled. For backward compatibility, we have to keep track the old key.
+	Headers              map[string]string `json:"headers"`
+	AcceptProxyProtocol  bool              `json:"acceptProxyProtocol"`
+	MaxEarlyData         int32             `json:"maxEarlyData"`
+	UseBrowserForwarding bool              `json:"useBrowserForwarding"`
 }
 
 // Build implements Buildable.
@@ -154,8 +157,10 @@ func (c *WebSocketConfig) Build() (proto.Message, error) {
 		})
 	}
 	config := &websocket.Config{
-		Path:   path,
-		Header: header,
+		Path:                 path,
+		Header:               header,
+		MaxEarlyData:         c.MaxEarlyData,
+		UseBrowserForwarding: c.UseBrowserForwarding,
 	}
 	if c.AcceptProxyProtocol {
 		config.AcceptProxyProtocol = c.AcceptProxyProtocol
@@ -286,13 +291,12 @@ func (c *TLSCertConfig) Build() (*tls.Certificate, error) {
 }
 
 type TLSConfig struct {
-	Insecure                 bool             `json:"allowInsecure"`
-	InsecureCiphers          bool             `json:"allowInsecureCiphers"`
-	Certs                    []*TLSCertConfig `json:"certificates"`
-	ServerName               string           `json:"serverName"`
-	ALPN                     *StringList      `json:"alpn"`
-	DisableSessionResumption bool             `json:"disableSessionResumption"`
-	DisableSystemRoot        bool             `json:"disableSystemRoot"`
+	Insecure                bool             `json:"allowInsecure"`
+	Certs                   []*TLSCertConfig `json:"certificates"`
+	ServerName              string           `json:"serverName"`
+	ALPN                    *StringList      `json:"alpn"`
+	EnableSessionResumption bool             `json:"enableSessionResumption"`
+	DisableSystemRoot       bool             `json:"disableSystemRoot"`
 }
 
 // Build implements Buildable.
@@ -308,14 +312,13 @@ func (c *TLSConfig) Build() (proto.Message, error) {
 	}
 	serverName := c.ServerName
 	config.AllowInsecure = c.Insecure
-	config.AllowInsecureCiphers = c.InsecureCiphers
 	if len(c.ServerName) > 0 {
 		config.ServerName = serverName
 	}
 	if c.ALPN != nil && len(*c.ALPN) > 0 {
 		config.NextProtocol = []string(*c.ALPN)
 	}
-	config.DisableSessionResumption = c.DisableSessionResumption
+	config.EnableSessionResumption = c.EnableSessionResumption
 	config.DisableSystemRoot = c.DisableSystemRoot
 	return config, nil
 }
@@ -337,6 +340,8 @@ func (p TransportProtocol) Build() (string, error) {
 		return "domainsocket", nil
 	case "quic":
 		return "quic", nil
+	case "gun", "grpc":
+		return "gun", nil
 	default:
 		return "", newError("Config: unknown transport protocol: ", p)
 	}
@@ -387,6 +392,8 @@ type StreamConfig struct {
 	HTTPSettings   *HTTPConfig         `json:"httpSettings"`
 	DSSettings     *DomainSocketConfig `json:"dsSettings"`
 	QUICSettings   *QUICConfig         `json:"quicSettings"`
+	GunSettings    *GunConfig          `json:"gunSettings"`
+	GRPCSettings   *GunConfig          `json:"grpcSettings"`
 	SocketSettings *SocketConfig       `json:"sockopt"`
 }
 
@@ -468,17 +475,30 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
 	if c.QUICSettings != nil {
 		qs, err := c.QUICSettings.Build()
 		if err != nil {
-			return nil, newError("Failed to build QUIC config").Base(err)
+			return nil, newError("Failed to build QUIC config.").Base(err)
 		}
 		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
 			ProtocolName: "quic",
 			Settings:     serial.ToTypedMessage(qs),
 		})
 	}
+	if c.GunSettings == nil {
+		c.GunSettings = c.GRPCSettings
+	}
+	if c.GunSettings != nil {
+		gs, err := c.GunSettings.Build()
+		if err != nil {
+			return nil, newError("Failed to build Gun config.").Base(err)
+		}
+		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
+			ProtocolName: "gun",
+			Settings:     serial.ToTypedMessage(gs),
+		})
+	}
 	if c.SocketSettings != nil {
 		ss, err := c.SocketSettings.Build()
 		if err != nil {
-			return nil, newError("Failed to build sockopt").Base(err)
+			return nil, newError("Failed to build sockopt.").Base(err)
 		}
 		config.SocketSettings = ss
 	}
@@ -486,7 +506,8 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
 }
 
 type ProxyConfig struct {
-	Tag string `json:"tag"`
+	Tag                 string `json:"tag"`
+	TransportLayerProxy bool   `json:"transportLayer"`
 }
 
 // Build implements Buildable.
@@ -495,6 +516,7 @@ func (v *ProxyConfig) Build() (*internet.ProxyConfig, error) {
 		return nil, newError("Proxy tag is not set.")
 	}
 	return &internet.ProxyConfig{
-		Tag: v.Tag,
+		Tag:                 v.Tag,
+		TransportLayerProxy: v.TransportLayerProxy,
 	}, nil
 }

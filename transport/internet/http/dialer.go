@@ -10,12 +10,13 @@ import (
 	"sync"
 
 	"golang.org/x/net/http2"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/transport/internet"
-	"v2ray.com/core/transport/internet/tls"
-	"v2ray.com/core/transport/pipe"
+
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/tls"
+	"github.com/v2fly/v2ray-core/v4/transport/pipe"
 )
 
 var (
@@ -67,9 +68,6 @@ func getHTTPClient(_ context.Context, dest net.Destination, tlsSettings *tls.Con
 			state := cn.ConnectionState()
 			if p := state.NegotiatedProtocol; p != http2.NextProtoTLS {
 				return nil, newError("http2: unexpected ALPN protocol " + p + "; want q" + http2.NextProtoTLS).AtError()
-			}
-			if !state.NegotiatedProtocolIsMutual {
-				return nil, newError("http2: could not negotiate protocol mutually").AtError()
 			}
 			return cn, nil
 		},

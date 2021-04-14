@@ -6,8 +6,9 @@ import (
 	"syscall"
 
 	"github.com/pires/go-proxyproto"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/session"
+
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/session"
 )
 
 var (
@@ -54,7 +55,7 @@ func (dl *DefaultListener) Listen(ctx context.Context, addr net.Addr, sockopt *S
 		lc.Control = nil
 		network = addr.Network()
 		address = addr.Name
-		if runtime.GOOS == "linux" && address[0] == '@' {
+		if (runtime.GOOS == "linux" || runtime.GOOS == "android") && address[0] == '@' {
 			// linux abstract unix domain socket is lockfree
 			if len(address) > 1 && address[1] == '@' {
 				// but may need padding to work with haproxy
